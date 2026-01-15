@@ -5,3 +5,7 @@ __pycache__/
 data/
 mxl/
 deduplication.log
+verification_original.mid
+verification_corrupted.mid
+verification_labels.txt
+generate_verification.py
