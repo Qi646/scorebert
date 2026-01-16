@@ -9,3 +9,6 @@ verification_original.mid
 verification_corrupted.mid
 verification_labels.txt
 generate_verification.py
+sanity_check.py
+debug_window.py
+test_dataset_script.py

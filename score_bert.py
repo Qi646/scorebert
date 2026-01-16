@@ -53,14 +53,23 @@ class ScoreBERT(nn.Module):
     ):
         super().__init__()
         
-        # --- Embeddings ---
-        # 128 MIDI pitches + 1 Padding token + 1 Mask token (just in case) = 130
-        self.pitch_embedding = nn.Embedding(130, d_model)
+        # 128 MIDI pitches + 1 Padding token
+        self.pitch_embedding = nn.Embedding(129, d_model)
         
         # Duration is continuous, so we project it to d_model
-        self.duration_projection = nn.Linear(1, d_model)
+        # To avoid feature scale issues, we have a small net for duration
+        self.duration_embedder = nn.Sequential(
+            nn.Linear(1, d_model // 2),
+            nn.ReLU(),
+            nn.Linear(d_model // 2, d_model)
+        )
+        
+        # We will now CONCATENATE embeddings and project down
+        # This is more robust than simple addition.
+        self.embedding_combiner = nn.Linear(d_model * 2, d_model)
         
         self.pos_encoder = PositionalEncoding(d_model)
+        self.layer_norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(p=dropout)
         
         # --- Transformer Encoder ---
@@ -69,21 +78,14 @@ class ScoreBERT(nn.Module):
             nhead=nhead, 
             dim_feedforward=dim_feedforward, 
             dropout=dropout,
-            batch_first=True  # Important: (Batch, Seq, Feature)
+            batch_first=True
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
         # --- Multi-Task Heads ---
-        # 1. Rhythm Head: Predicts Grid Index (0-47)
         self.head_rhythm = nn.Linear(d_model, 48)
-        
-        # 2. Spelling Head: Predicts Flat/Nat/Sharp (3 classes)
         self.head_spelling = nn.Linear(d_model, 3)
-        
-        # 3. Staff Head: Predicts Staff Index (2 classes: 0/1)
         self.head_staff = nn.Linear(d_model, 2)
-        
-        # 4. Tuplet Head: Predicts Tuplet Class (4 classes: None/3/5/7)
         self.head_tuplet = nn.Linear(d_model, 4)
         
         self.d_model = d_model
@@ -91,29 +93,24 @@ class ScoreBERT(nn.Module):
     def forward(self, pitch: torch.Tensor, duration: torch.Tensor, src_key_padding_mask: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass of the model.
-        
-        Args:
-            pitch: Tensor (Batch, Seq_Len) containing MIDI pitch integers.
-            duration: Tensor (Batch, Seq_Len) containing duration values (float).
-            src_key_padding_mask: BoolTensor (Batch, Seq_Len) where True indicates padding.
-            
-        Returns:
-            Tuple of logits: (rhythm_logits, spelling_logits, staff_logits, tuplet_logits)
         """
         # 1. Embeddings
-        # Combine Pitch and Duration embeddings
-        # We can sum them or concat them. Summing is standard in BERT-like models if dimensions match.
-        pitch_emb = self.pitch_embedding(pitch) * math.sqrt(self.d_model) # Scaling is often helpful
-        dur_emb = self.duration_projection(duration.unsqueeze(-1)) # (Batch, Seq, 1) -> (Batch, Seq, d_model)
+        pitch_emb = self.pitch_embedding(pitch)
         
-        x = pitch_emb + dur_emb
+        # Normalize and embed duration
+        norm_duration = torch.log1p(duration).unsqueeze(-1)
+        dur_emb = self.duration_embedder(norm_duration)
         
-        # 2. Positional Encoding
+        # Concatenate and project
+        combined_emb = torch.cat([pitch_emb, dur_emb], dim=-1)
+        x = self.embedding_combiner(combined_emb)
+        
+        # 2. Positional Encoding & Normalization
         x = self.pos_encoder(x)
+        x = self.layer_norm(x) # LayerNorm is crucial for stability
         x = self.dropout(x)
         
         # 3. Transformer Encoder
-        # src_key_padding_mask requires (Batch, Seq_Len)
         x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
         
         # 4. Heads

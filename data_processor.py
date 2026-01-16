@@ -165,9 +165,9 @@ class ScoreProcessor:
                 'duration': float(new_duration)
             }
             corrupted_events.append(input_event)
-            
-        # Re-sort corrupted events
-        corrupted_events.sort(key=lambda x: (x['onset'], x['pitch']))
+        
+        # DO NOT RE-SORT. The i-th corrupted event must correspond to the i-th label.
+        # The model uses Positional Encoding, not absolute onset, to learn order.
         
         return corrupted_events
 
