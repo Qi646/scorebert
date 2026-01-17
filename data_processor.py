@@ -19,6 +19,47 @@ class ScoreProcessor:
         """
         pass
         
+    def process_midi_file(self, midi_path: str) -> Optional[List[Dict[str, float]]]:
+        """
+        Processes a raw MIDI file for inference.
+        Returns a list of input dictionaries (pitch, onset, duration).
+        """
+        try:
+            mf = music21.midi.MidiFile()
+            mf.open(midi_path)
+            mf.read()
+            mf.close()
+            stream = music21.midi.translate.midiFileToStream(mf)
+            
+            # Flatten and filter
+            flat_stream = stream.flatten()
+            note_events = []
+            
+            for element in flat_stream.getElementsByClass(['Note', 'Chord']):
+                sub_notes = []
+                offset = float(element.offset)
+                duration = float(element.duration.quarterLength)
+                
+                if isinstance(element, music21.chord.Chord):
+                    sub_notes = list(element.notes)
+                elif isinstance(element, music21.note.Note):
+                    sub_notes = [element]
+                    
+                for n in sub_notes:
+                    note_events.append({
+                        'pitch': float(n.pitch.midi),
+                        'onset': offset,
+                        'duration': duration
+                    })
+            
+            # Sort by onset then pitch
+            note_events.sort(key=lambda x: (x['onset'], x['pitch']))
+            return note_events
+            
+        except Exception as e:
+            print(f"Error processing MIDI {midi_path}: {e}")
+            return None
+
     def process_file(self, file_path: str) -> Tuple[Optional[List[Dict[str, float]]], Optional[List[Dict[str, Any]]]]:
         """
         Main entry point for processing a single MusicXML file.

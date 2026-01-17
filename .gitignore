@@ -12,3 +12,8 @@ generate_verification.py
 sanity_check.py
 debug_window.py
 test_dataset_script.py
+reconstruction_test.musicxml
+test_input.mid
+test_output.musicxml
+checkpoints/
+
